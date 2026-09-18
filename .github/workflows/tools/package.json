@@ -1,0 +1,18 @@
+{
+  "name": "verb-content-workflow-tools",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Self-contained TypeScript md2json batch driver for the verb-content-pr workflow. Identical to the bundle used in the destination repo (agentic-seo). Run with tsx.",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "rehype-stringify": "^10.0.1",
+    "remark-gfm": "^4.0.1",
+    "remark-parse": "^11.0.0",
+    "remark-rehype": "^11.1.2",
+    "tsx": "^4.19.0",
+    "unified": "^11.0.5"
+  }
+}

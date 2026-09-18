@@ -1,0 +1,13 @@
+{
+  "$comment": "Config for the verb-content-pr workflow — identical shape to the one that will run in agentic-seo. Output path mirrors the real destination (src/content/verbs). In da-dc this is a rehearsal: the PR it opens can be closed. Change `sourceBase`/`sourcePathTemplate`/`verbs`/`locales` for the real destination.",
+  "sourceBase": "https://main--da-dc--adobecom.aem.live",
+  "sourcePathTemplate": "{localePrefix}/drafts/ruchika/fragments/{verb}.md",
+  "outPathTemplate": "src/content/verbs/{verb}/{locale}.json",
+  "locales": {
+    "en-US": ""
+  },
+  "verbs": [
+    "word-to-pdf",
+    "jpg-to-pdf"
+  ]
+}
