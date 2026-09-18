@@ -25,8 +25,18 @@ on:
         required: false
         default: ''
         type: string
+      md_urls:
+        description: "Optional: full .md URLs (comma/space separated). If set, these are used INSTEAD of the config list."
+        required: false
+        default: ''
+        type: string
+      locale:
+        description: Fallback locale for entered URLs when it can't be detected from the path
+        required: false
+        default: en-US
+        type: string
       config_path:
-        description: Path to the batch config
+        description: Path to the batch config (used when md_urls is empty)
         required: false
         default: .github/workflows/tools/verb-content.config.json
         type: string
@@ -63,6 +73,8 @@ jobs:
           FEATURE_BRANCH: ${{ inputs.feature_branch }}
           BASE_BRANCH: ${{ inputs.base_branch }}
           CONFIG_PATH: ${{ inputs.config_path }}
+          MD_URLS: ${{ inputs.md_urls }}
+          LOCALE: ${{ inputs.locale }}
           STRICT: ${{ inputs.strict }}
         run: |
           set -euo pipefail
@@ -78,9 +90,16 @@ jobs:
             git switch -c "$FEATURE_BRANCH"
           fi
 
-          (cd .github/workflows/tools && npx tsx generate.ts \
-            --config "$GITHUB_WORKSPACE/$CONFIG_PATH" \
-            --out-dir "$GITHUB_WORKSPACE" $STRICT_FLAG)
+          if [ -n "$MD_URLS" ]; then
+            (cd .github/workflows/tools && npx tsx generate.ts \
+              --config "$GITHUB_WORKSPACE/$CONFIG_PATH" \
+              --out-dir "$GITHUB_WORKSPACE" \
+              --urls "$MD_URLS" --locale "$LOCALE" $STRICT_FLAG)
+          else
+            (cd .github/workflows/tools && npx tsx generate.ts \
+              --config "$GITHUB_WORKSPACE/$CONFIG_PATH" \
+              --out-dir "$GITHUB_WORKSPACE" $STRICT_FLAG)
+          fi
 
           git add -A
           if git diff --cached --quiet; then

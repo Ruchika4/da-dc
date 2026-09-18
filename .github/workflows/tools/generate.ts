@@ -39,7 +39,41 @@ function resolveEntry(config: VerbContentConfig, verb: string, locale: string, m
   };
 }
 
-export function expandTargets(config: VerbContentConfig): Target[] {
+/** Detect locale from a URL's path prefix using the config's locale map, else fall back. */
+function detectLocale(url: string, locales: Record<string, string> | undefined, fallback: string): string {
+  let pathname: string;
+  try { pathname = new URL(url).pathname; } catch { return fallback; }
+  for (const [locale, prefix] of Object.entries(locales ?? {})) {
+    if (prefix && (pathname === `/${prefix}` || pathname.startsWith(`/${prefix}/`))) return locale;
+  }
+  return fallback;
+}
+
+/** Build a target from a full `.md` URL: verb from the filename, locale from the path (or fallback). */
+function targetFromUrl(config: VerbContentConfig, url: string, fallbackLocale: string): Target {
+  const clean = url.trim();
+  let pathname = clean;
+  try { pathname = new URL(clean).pathname; } catch { /* keep as-is */ }
+  const verb = decodeURIComponent(pathname.split('/').pop() || '').replace(/\.md$/i, '');
+  const locale = detectLocale(clean, config.locales, fallbackLocale);
+  return {
+    verb,
+    locale,
+    mdUrl: clean,
+    outPath: config.outPathTemplate.replaceAll('{verb}', verb).replaceAll('{locale}', locale),
+  };
+}
+
+/**
+ * @param opts.urls  when provided, ad-hoc full `.md` URLs are used INSTEAD of the
+ *                   config's verbs × locales (verb from filename, locale from path
+ *                   prefix or `fallbackLocale`).
+ */
+export function expandTargets(config: VerbContentConfig, opts: { urls?: string[]; fallbackLocale?: string } = {}): Target[] {
+  const fallbackLocale = opts.fallbackLocale ?? 'en-US';
+  if (opts.urls && opts.urls.length) {
+    return opts.urls.map((u) => targetFromUrl(config, u, fallbackLocale));
+  }
   const targets: Target[] = [];
   for (const e of config.entries ?? []) targets.push(resolveEntry(config, e.verb, e.locale, e.mdUrl, e.outPath));
   if (config.verbs && config.locales) {
@@ -50,12 +84,12 @@ export function expandTargets(config: VerbContentConfig): Target[] {
   return targets;
 }
 
-export interface RunOptions { rootDir?: string; fetch?: typeof fetch; logger?: Pick<Console, 'log'>; }
+export interface RunOptions { rootDir?: string; fetch?: typeof fetch; logger?: Pick<Console, 'log'>; urls?: string[]; fallbackLocale?: string; }
 export interface RunResult { written: string[]; skipped: { outPath: string; reason: string }[]; warnings: string[]; }
 
 export async function run(config: VerbContentConfig, opts: RunOptions = {}): Promise<RunResult> {
   const { rootDir = '.', fetch: fetchImpl = globalThis.fetch, logger = console } = opts;
-  const targets = expandTargets(config);
+  const targets = expandTargets(config, { urls: opts.urls, fallbackLocale: opts.fallbackLocale });
   const written: string[] = [];
   const skipped: { outPath: string; reason: string }[] = [];
   const warnings: string[] = [];
@@ -99,14 +133,22 @@ export async function run(config: VerbContentConfig, opts: RunOptions = {}): Pro
 
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
-  const opts = { config: 'verb-content.config.json', outDir: '.', strict: false };
+  const opts = { config: 'verb-content.config.json', outDir: '.', strict: false, urls: '', locale: 'en-US' };
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === '--config') opts.config = argv[(i += 1)];
     else if (argv[i] === '--out-dir') opts.outDir = argv[(i += 1)];
+    else if (argv[i] === '--urls') opts.urls = argv[(i += 1)];
+    else if (argv[i] === '--locale') opts.locale = argv[(i += 1)];
     else if (argv[i] === '--strict') opts.strict = true;
   }
   const config = JSON.parse(await fs.readFile(opts.config, 'utf-8')) as VerbContentConfig;
-  const { warnings } = await run(config, { rootDir: opts.outDir });
+  // Ad-hoc URLs (comma/space/newline separated) override the config's verbs × locales.
+  const urls = opts.urls.split(/[\s,]+/).map((u) => u.trim()).filter(Boolean);
+  const { warnings } = await run(config, {
+    rootDir: opts.outDir,
+    urls: urls.length ? urls : undefined,
+    fallbackLocale: opts.locale,
+  });
   if (opts.strict && warnings.length) {
     process.stderr.write(`error: --strict: ${warnings.length} grammar warning(s)\n`);
     process.exit(2);
