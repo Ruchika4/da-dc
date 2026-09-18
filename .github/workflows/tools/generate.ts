@@ -90,6 +90,11 @@ function targetsFromUrl(config: VerbContentConfig, url: string, localesSel?: str
   const origin = u ? u.origin : config.sourceBase;
   const basePath = stripLocalePrefix(pathname, config.locales);
   const verb = decodeURIComponent(basePath.split('/').pop() || '').replace(/\.(md|json)$/i, '');
+  // A `.json` source carries page metadata (not grid-table content), so its
+  // output is filed under `<verb>-metadata` — kept separate from the .md-derived
+  // verb content. The source URL itself still uses the real filename.
+  const isJson = /\.json(\?|#|$)/i.test(clean);
+  const outVerb = isJson ? `${verb}-metadata` : verb;
 
   let locales: string[];
   if (localesSel === 'all') locales = Object.keys(config.locales ?? {});
@@ -103,7 +108,7 @@ function targetsFromUrl(config: VerbContentConfig, url: string, localesSel?: str
       verb,
       locale,
       sourceUrl: `${origin}${prefixSeg}${basePath}`,
-      outPath: config.outPathTemplate.replaceAll('{verb}', verb).replaceAll('{locale}', locale),
+      outPath: config.outPathTemplate.replaceAll('{verb}', outVerb).replaceAll('{locale}', locale),
     };
   });
 }
