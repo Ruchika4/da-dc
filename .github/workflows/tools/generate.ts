@@ -39,23 +39,31 @@ function resolveEntry(config: VerbContentConfig, verb: string, locale: string, m
   };
 }
 
-/** Detect locale from a URL's path prefix using the config's locale map, else fall back. */
-function detectLocale(url: string, locales: Record<string, string> | undefined, fallback: string): string {
+/** The locale whose prefix is "" in the map is the default (no path prefix). */
+function defaultLocale(locales: Record<string, string> | undefined): string {
+  for (const [locale, prefix] of Object.entries(locales ?? {})) {
+    if (prefix === '') return locale;
+  }
+  return Object.keys(locales ?? {})[0] ?? 'en-US';
+}
+
+/** Detect locale purely from a URL's path prefix using the config's locale map. */
+function detectLocale(url: string, locales: Record<string, string> | undefined): string {
   let pathname: string;
-  try { pathname = new URL(url).pathname; } catch { return fallback; }
+  try { pathname = new URL(url).pathname; } catch { return defaultLocale(locales); }
   for (const [locale, prefix] of Object.entries(locales ?? {})) {
     if (prefix && (pathname === `/${prefix}` || pathname.startsWith(`/${prefix}/`))) return locale;
   }
-  return fallback;
+  return defaultLocale(locales);
 }
 
-/** Build a target from a full `.md` URL: verb from the filename, locale from the path (or fallback). */
-function targetFromUrl(config: VerbContentConfig, url: string, fallbackLocale: string): Target {
+/** Build a target from a full `.md` URL: verb from the filename, locale from the path via the map. */
+function targetFromUrl(config: VerbContentConfig, url: string): Target {
   const clean = url.trim();
   let pathname = clean;
   try { pathname = new URL(clean).pathname; } catch { /* keep as-is */ }
   const verb = decodeURIComponent(pathname.split('/').pop() || '').replace(/\.md$/i, '');
-  const locale = detectLocale(clean, config.locales, fallbackLocale);
+  const locale = detectLocale(clean, config.locales);
   return {
     verb,
     locale,
@@ -66,13 +74,13 @@ function targetFromUrl(config: VerbContentConfig, url: string, fallbackLocale: s
 
 /**
  * @param opts.urls  when provided, ad-hoc full `.md` URLs are used INSTEAD of the
- *                   config's verbs × locales (verb from filename, locale from path
- *                   prefix or `fallbackLocale`).
+ *                   config's verbs × locales. Verb comes from the filename; locale
+ *                   is detected from the path prefix via the config's `locales` map
+ *                   (the empty-prefix entry is the default).
  */
-export function expandTargets(config: VerbContentConfig, opts: { urls?: string[]; fallbackLocale?: string } = {}): Target[] {
-  const fallbackLocale = opts.fallbackLocale ?? 'en-US';
+export function expandTargets(config: VerbContentConfig, opts: { urls?: string[] } = {}): Target[] {
   if (opts.urls && opts.urls.length) {
-    return opts.urls.map((u) => targetFromUrl(config, u, fallbackLocale));
+    return opts.urls.map((u) => targetFromUrl(config, u));
   }
   const targets: Target[] = [];
   for (const e of config.entries ?? []) targets.push(resolveEntry(config, e.verb, e.locale, e.mdUrl, e.outPath));
@@ -84,12 +92,12 @@ export function expandTargets(config: VerbContentConfig, opts: { urls?: string[]
   return targets;
 }
 
-export interface RunOptions { rootDir?: string; fetch?: typeof fetch; logger?: Pick<Console, 'log'>; urls?: string[]; fallbackLocale?: string; }
+export interface RunOptions { rootDir?: string; fetch?: typeof fetch; logger?: Pick<Console, 'log'>; urls?: string[]; }
 export interface RunResult { written: string[]; skipped: { outPath: string; reason: string }[]; warnings: string[]; }
 
 export async function run(config: VerbContentConfig, opts: RunOptions = {}): Promise<RunResult> {
   const { rootDir = '.', fetch: fetchImpl = globalThis.fetch, logger = console } = opts;
-  const targets = expandTargets(config, { urls: opts.urls, fallbackLocale: opts.fallbackLocale });
+  const targets = expandTargets(config, { urls: opts.urls });
   const written: string[] = [];
   const skipped: { outPath: string; reason: string }[] = [];
   const warnings: string[] = [];
@@ -133,21 +141,20 @@ export async function run(config: VerbContentConfig, opts: RunOptions = {}): Pro
 
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
-  const opts = { config: 'verb-content.config.json', outDir: '.', strict: false, urls: '', locale: 'en-US' };
+  const opts = { config: 'verb-content.config.json', outDir: '.', strict: false, urls: '' };
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === '--config') opts.config = argv[(i += 1)];
     else if (argv[i] === '--out-dir') opts.outDir = argv[(i += 1)];
     else if (argv[i] === '--urls') opts.urls = argv[(i += 1)];
-    else if (argv[i] === '--locale') opts.locale = argv[(i += 1)];
     else if (argv[i] === '--strict') opts.strict = true;
   }
   const config = JSON.parse(await fs.readFile(opts.config, 'utf-8')) as VerbContentConfig;
-  // Ad-hoc URLs (comma/space/newline separated) override the config's verbs × locales.
+  // Ad-hoc URLs (comma/space/newline separated) override the config's verbs × locales;
+  // locale is detected from each URL's path prefix via the config's `locales` map.
   const urls = opts.urls.split(/[\s,]+/).map((u) => u.trim()).filter(Boolean);
   const { warnings } = await run(config, {
     rootDir: opts.outDir,
     urls: urls.length ? urls : undefined,
-    fallbackLocale: opts.locale,
   });
   if (opts.strict && warnings.length) {
     process.stderr.write(`error: --strict: ${warnings.length} grammar warning(s)\n`);

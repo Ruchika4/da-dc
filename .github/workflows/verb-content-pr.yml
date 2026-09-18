@@ -26,14 +26,9 @@ on:
         default: ''
         type: string
       md_urls:
-        description: "Optional: full .md URLs (comma/space separated). If set, these are used INSTEAD of the config list."
+        description: "Optional: full .md URLs (comma/space separated). If set, these are used INSTEAD of the config list. Locale is detected from each URL's path prefix."
         required: false
         default: ''
-        type: string
-      locale:
-        description: Fallback locale for entered URLs when it can't be detected from the path
-        required: false
-        default: en-US
         type: string
       config_path:
         description: Path to the batch config (used when md_urls is empty)
@@ -74,7 +69,6 @@ jobs:
           BASE_BRANCH: ${{ inputs.base_branch }}
           CONFIG_PATH: ${{ inputs.config_path }}
           MD_URLS: ${{ inputs.md_urls }}
-          LOCALE: ${{ inputs.locale }}
           STRICT: ${{ inputs.strict }}
         run: |
           set -euo pipefail
@@ -94,7 +88,7 @@ jobs:
             (cd .github/workflows/tools && npx tsx generate.ts \
               --config "$GITHUB_WORKSPACE/$CONFIG_PATH" \
               --out-dir "$GITHUB_WORKSPACE" \
-              --urls "$MD_URLS" --locale "$LOCALE" $STRICT_FLAG)
+              --urls "$MD_URLS" $STRICT_FLAG)
           else
             (cd .github/workflows/tools && npx tsx generate.ts \
               --config "$GITHUB_WORKSPACE/$CONFIG_PATH" \
