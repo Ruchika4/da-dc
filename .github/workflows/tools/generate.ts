@@ -1,11 +1,16 @@
 #!/usr/bin/env tsx
 /**
- * Self-contained batch driver for the verb-content-pr workflow. Everything it
- * needs lives under .github/workflows/tools. Reads a config, generates one JSON
- * per verb × locale (fetch each locale's published `.md`, convert), writes into
- * the repo, and bumps `revision`.
+ * Self-contained batch driver for the "Content export to Astro" workflow.
+ * Everything it needs lives under .github/workflows/tools. Reads a config,
+ * fetches each source and writes one JSON per verb × locale into the repo,
+ * bumping `revision` on change.
  *
- *   tsx .github/workflows/tools/generate.ts --config <cfg> --out-dir . [--strict]
+ * A source may be:
+ *   - DA grid-table Markdown (`.md`) → parsed + grammar-validated via `convert`
+ *   - already-shaped JSON (`.json`)  → used as-is (no grammar)
+ * detected by the source URL's extension.
+ *
+ *   tsx .github/workflows/tools/generate.ts --config <cfg> --out-dir . [--urls …] [--locales …] [--strict]
  */
 
 import { promises as fs } from 'node:fs';
@@ -19,12 +24,12 @@ export interface VerbContentConfig {
   outPathTemplate: string;
   locales: Record<string, string>;
   verbs?: string[];
-  entries?: { verb: string; locale: string; mdUrl?: string; outPath?: string }[];
+  entries?: { verb: string; locale: string; sourceUrl?: string; outPath?: string }[];
 }
 
-interface Target { verb: string; locale: string; mdUrl: string; outPath: string; }
+interface Target { verb: string; locale: string; sourceUrl: string; outPath: string; }
 
-function resolveEntry(config: VerbContentConfig, verb: string, locale: string, mdUrl?: string, outPath?: string): Target {
+function resolveEntry(config: VerbContentConfig, verb: string, locale: string, sourceUrl?: string, outPath?: string): Target {
   const prefix = config.locales?.[locale] ?? '';
   const prefixSeg = prefix ? `/${prefix}` : '';
   const srcPath = config.sourcePathTemplate
@@ -34,7 +39,7 @@ function resolveEntry(config: VerbContentConfig, verb: string, locale: string, m
   return {
     verb,
     locale,
-    mdUrl: mdUrl || `${config.sourceBase}${srcPath}`,
+    sourceUrl: sourceUrl || `${config.sourceBase}${srcPath}`,
     outPath: outPath || config.outPathTemplate.replaceAll('{verb}', verb).replaceAll('{locale}', locale),
   };
 }
@@ -84,7 +89,7 @@ function targetsFromUrl(config: VerbContentConfig, url: string, localesSel?: str
   const pathname = u ? u.pathname : clean;
   const origin = u ? u.origin : config.sourceBase;
   const basePath = stripLocalePrefix(pathname, config.locales);
-  const verb = decodeURIComponent(basePath.split('/').pop() || '').replace(/\.md$/i, '');
+  const verb = decodeURIComponent(basePath.split('/').pop() || '').replace(/\.(md|json)$/i, '');
 
   let locales: string[];
   if (localesSel === 'all') locales = Object.keys(config.locales ?? {});
@@ -97,7 +102,7 @@ function targetsFromUrl(config: VerbContentConfig, url: string, localesSel?: str
     return {
       verb,
       locale,
-      mdUrl: `${origin}${prefixSeg}${basePath}`,
+      sourceUrl: `${origin}${prefixSeg}${basePath}`,
       outPath: config.outPathTemplate.replaceAll('{verb}', verb).replaceAll('{locale}', locale),
     };
   });
@@ -114,7 +119,7 @@ export function expandTargets(config: VerbContentConfig, opts: { urls?: string[]
     return opts.urls.flatMap((u) => targetsFromUrl(config, u, opts.locales));
   }
   const targets: Target[] = [];
-  for (const e of config.entries ?? []) targets.push(resolveEntry(config, e.verb, e.locale, e.mdUrl, e.outPath));
+  for (const e of config.entries ?? []) targets.push(resolveEntry(config, e.verb, e.locale, e.sourceUrl, e.outPath));
   if (config.verbs && config.locales) {
     for (const verb of config.verbs) {
       for (const locale of Object.keys(config.locales)) targets.push(resolveEntry(config, verb, locale));
@@ -136,15 +141,25 @@ export async function run(config: VerbContentConfig, opts: RunOptions = {}): Pro
   for (const t of targets) {
     let res: Response;
     try {
-      res = await fetchImpl(t.mdUrl, { cache: 'no-store' });
+      res = await fetchImpl(t.sourceUrl, { cache: 'no-store' });
     } catch (err) {
       skipped.push({ outPath: t.outPath, reason: `fetch error: ${err instanceof Error ? err.message : String(err)}` });
       continue;
     }
-    if (!res.ok) { skipped.push({ outPath: t.outPath, reason: `source ${res.status} ${t.mdUrl}` }); continue; }
+    if (!res.ok) { skipped.push({ outPath: t.outPath, reason: `source ${res.status} ${t.sourceUrl}` }); continue; }
     const raw = await res.text();
-    const { data, warnings: w } = convert(raw, { verb: t.verb, locale: t.locale });
-    for (const one of w) warnings.push(`${t.verb}/${t.locale}: ${one}`);
+
+    // Source may be DA grid-table Markdown (.md → convert + grammar) or already
+    // shaped JSON (.json → use as-is, no grammar). Detected by the URL extension.
+    let data: Record<string, unknown>;
+    if (/\.json(\?|#|$)/i.test(t.sourceUrl)) {
+      try { data = JSON.parse(raw); } catch { skipped.push({ outPath: t.outPath, reason: `invalid JSON source ${t.sourceUrl}` }); continue; }
+      delete (data as { revision?: unknown }).revision; // revision is managed here, not taken from the source
+    } else {
+      const converted = convert(raw, { verb: t.verb, locale: t.locale });
+      data = converted.data;
+      for (const one of converted.warnings) warnings.push(`${t.verb}/${t.locale}: ${one}`);
+    }
 
     const full = path.join(rootDir, t.outPath);
     let revision = 1;

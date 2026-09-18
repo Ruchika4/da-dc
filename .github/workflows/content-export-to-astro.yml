@@ -1,17 +1,18 @@
-# md2json — regenerate verb-content JSON (batch) and open a PR.
+# Content export to Astro — batch-generate verb-content JSON and open a PR.
 #
 # Fully self-contained: everything the workflow runs lives under
 # .github/workflows/tools (the batch driver, the converter, and its deps). It does
 # NOT depend on the rest of the repo, so it's easy to copy into another repo.
 #
-# This bundle is IDENTICAL to the one that will run in the destination repo
-# (agentic-seo): TypeScript, run with tsx, remark deps scoped here. da-dc is on
-# github.com (Actions supported), so it's where we rehearse the exact same flow —
-# it generates JSON at src/content/verbs/<verb>/<locale>.json and opens a PR within
-# da-dc using the built-in GITHUB_TOKEN. (The rehearsal PR can be closed.)
+# Each source may be DA grid-table Markdown (.md → parsed + grammar-validated) OR
+# already-shaped JSON (.json → used as-is, no grammar) — detected by the URL's
+# extension. Output: src/content/verbs/<verb>/<locale>.json; `revision` is bumped
+# on change; one PR is opened/updated.
 #
-# TRIGGER: Actions tab → Run workflow → provide a feature branch.
-name: verb-content PR (md2json)
+# This bundle is IDENTICAL to the one prepared for the destination repo
+# (agentic-seo). da-dc is on github.com (Actions supported), so it's where we
+# rehearse the exact same flow. TRIGGER: Actions tab → Run workflow.
+name: Content export to Astro
 
 on:
   workflow_dispatch:
@@ -25,23 +26,23 @@ on:
         required: false
         default: ''
         type: string
-      md_urls:
-        description: "Optional: base .md URLs (comma/space separated). If set, used INSTEAD of the config list."
+      source_urls:
+        description: "Optional: base source URLs (.md or .json), comma/space separated. If set, used INSTEAD of the config list."
         required: false
         default: ''
         type: string
       locales:
-        description: "Locales for md_urls: blank = from each URL's prefix; 'all' = every configured locale; or a comma list (e.g. en-US,de-DE)."
+        description: "Locales for source_urls: blank = from each URL's prefix; 'all' = every configured locale; or a comma list (e.g. en-US,de-DE)."
         required: false
         default: ''
         type: string
       config_path:
-        description: Path to the batch config (used when md_urls is empty)
+        description: Path to the batch config (used when source_urls is empty)
         required: false
         default: .github/workflows/tools/verb-content.config.json
         type: string
       strict:
-        description: Fail if any page trips grammar validation
+        description: Fail if any .md page trips grammar validation
         required: false
         default: false
         type: boolean
@@ -51,7 +52,7 @@ permissions:
   pull-requests: write
 
 jobs:
-  generate-and-pr:
+  export-and-pr:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -67,13 +68,13 @@ jobs:
       - name: Install workflow tool deps (TypeScript + tsx + remark)
         run: (cd .github/workflows/tools && npm ci || npm install)
 
-      - name: Regenerate JSON and open PR
+      - name: Export content and open PR
         env:
           GH_TOKEN: ${{ github.token }}
           FEATURE_BRANCH: ${{ inputs.feature_branch }}
           BASE_BRANCH: ${{ inputs.base_branch }}
           CONFIG_PATH: ${{ inputs.config_path }}
-          MD_URLS: ${{ inputs.md_urls }}
+          SOURCE_URLS: ${{ inputs.source_urls }}
           LOCALES: ${{ inputs.locales }}
           STRICT: ${{ inputs.strict }}
         run: |
@@ -81,8 +82,8 @@ jobs:
           BASE="${BASE_BRANCH:-$GITHUB_REF_NAME}"
           [ "$STRICT" = "true" ] && STRICT_FLAG="--strict" || STRICT_FLAG=""
 
-          git config user.name "md2json-bot"
-          git config user.email "md2json-bot@users.noreply.github.com"
+          git config user.name "content-export-bot"
+          git config user.email "content-export-bot@users.noreply.github.com"
 
           if git ls-remote --exit-code --heads origin "$FEATURE_BRANCH" >/dev/null 2>&1; then
             git switch "$FEATURE_BRANCH"
@@ -90,11 +91,11 @@ jobs:
             git switch -c "$FEATURE_BRANCH"
           fi
 
-          if [ -n "$MD_URLS" ]; then
+          if [ -n "$SOURCE_URLS" ]; then
             (cd .github/workflows/tools && npx tsx generate.ts \
               --config "$GITHUB_WORKSPACE/$CONFIG_PATH" \
               --out-dir "$GITHUB_WORKSPACE" \
-              --urls "$MD_URLS" --locales "$LOCALES" $STRICT_FLAG)
+              --urls "$SOURCE_URLS" --locales "$LOCALES" $STRICT_FLAG)
           else
             (cd .github/workflows/tools && npx tsx generate.ts \
               --config "$GITHUB_WORKSPACE/$CONFIG_PATH" \
@@ -103,15 +104,15 @@ jobs:
 
           git add -A
           if git diff --cached --quiet; then
-            echo "No verb-content changes — nothing to PR."
+            echo "No content changes — nothing to PR."
             exit 0
           fi
-          git commit -m "Regenerate verb-content JSON (md2json)"
+          git commit -m "Export verb-content JSON to Astro"
           git push origin "HEAD:$FEATURE_BRANCH"
 
           if ! gh pr view "$FEATURE_BRANCH" >/dev/null 2>&1; then
             gh pr create --base "$BASE" --head "$FEATURE_BRANCH" \
-              --title "Regenerate verb-content JSON (md2json)" \
+              --title "Export verb-content JSON to Astro" \
               --body "Batch-generated by .github/workflows/tools from \`${CONFIG_PATH}\`. Trigger: workflow_dispatch by @${GITHUB_ACTOR}. Changed files have their \`revision\` bumped."
           fi
           gh pr view "$FEATURE_BRANCH" --json url --jq .url
