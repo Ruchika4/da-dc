@@ -15,9 +15,17 @@ export interface Section {
   blocks: Block[];
 }
 
+/** An inline link found in loose content (outside any grid-table block). */
+export interface LooseLink {
+  text: string;
+  url: string;
+}
+
 export interface ParsedDocument {
   sections: Section[];
   linkReferences: Map<string, string>;
+  /** Inline `[text](url)` links that sit outside blocks — e.g. a CaaS reference. */
+  looseLinks: LooseLink[];
 }
 
 const isDivider = (line: string): boolean => /^\+[-=+]+\+$/.test(line.trim());
@@ -88,6 +96,8 @@ function splitChunks(lines: string[]): string[][] {
 }
 
 const LINK_REFERENCE_RE = /^\[([^\]]+)\]:\s*(\S+)\s*$/gm;
+// Inline `[text](url)` link. Used to pull links out of loose (non-table) content.
+const INLINE_LINK_RE = /\[([^\]]+)\]\(([^)\s]+)\)/g;
 
 export function parseBlockMarkdown(raw: string): ParsedDocument {
   const linkReferences = new Map<string, string>();
@@ -97,11 +107,20 @@ export function parseBlockMarkdown(raw: string): ParsedDocument {
 
   const lines = raw.split('\n');
   const sections: Section[] = [];
+  const looseLinks: LooseLink[] = [];
   let sectionLines: string[] = [];
 
   const flushSection = () => {
-    const chunks = splitChunks(sectionLines).filter((chunk) => isDivider(chunk[0]));
-    sections.push({ blocks: chunks.map(parseBlock) });
+    const chunks = splitChunks(sectionLines);
+    sections.push({ blocks: chunks.filter((chunk) => isDivider(chunk[0])).map(parseBlock) });
+    // Loose chunks (not grid-table blocks) can carry inline links — e.g. a CaaS
+    // "Content as a Service" reference — that would otherwise be dropped.
+    for (const chunk of chunks) {
+      if (isDivider(chunk[0])) continue;
+      for (const m of chunk.join('\n').matchAll(INLINE_LINK_RE)) {
+        looseLinks.push({ text: m[1].trim(), url: m[2] });
+      }
+    }
     sectionLines = [];
   };
 
@@ -111,5 +130,5 @@ export function parseBlockMarkdown(raw: string): ParsedDocument {
   }
   flushSection();
 
-  return { sections, linkReferences };
+  return { sections, linkReferences, looseLinks };
 }

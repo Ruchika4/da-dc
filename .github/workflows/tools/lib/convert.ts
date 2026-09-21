@@ -9,9 +9,10 @@ import { validateBlocks } from './validate';
 
 /**
  * SemVer of the OUTPUT SHAPE (not content — see `revision`, stamped on commit).
+ * 1.3.0 — added `links` (inline links outside blocks, e.g. CaaS references).
  * 1.2.0 — optional `revision`. 1.1.0 — `blocks` + `linkReferences`. 1.0.0 — howTo/faq.
  */
-export const SCHEMA_VERSION = '1.2.0';
+export const SCHEMA_VERSION = '1.3.0';
 
 export interface ConvertOptions {
   verb: string;
@@ -28,7 +29,7 @@ export interface ConvertResult {
 }
 
 export function convert(raw: string, { verb, locale, validate = true }: ConvertOptions): ConvertResult {
-  const { sections, linkReferences } = parseBlockMarkdown(raw);
+  const { sections, linkReferences, looseLinks } = parseBlockMarkdown(raw);
   const blocks = sections.flatMap((s) => s.blocks);
   const warnings: string[] = [];
 
@@ -45,6 +46,10 @@ export function convert(raw: string, { verb, locale, validate = true }: ConvertO
     const value = extract(blocks, linkReferences);
     if (value !== undefined) data[key] = value;
   }
+
+  // Inline links found outside any block (e.g. the CaaS "Content as a Service"
+  // reference). Omitted when there are none.
+  if (looseLinks.length) data.links = looseLinks;
 
   data.blocks = sections.flatMap((section, sectionIndex) => section.blocks.map((b) => ({
     section: sectionIndex,
